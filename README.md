@@ -1,4 +1,4 @@
-# ⚡ AI SQL Assistant & Document RAG Console
+# ⚡ AI SQL Assistant
 
 An enterprise-grade, high-fidelity AI-powered SQL Assistant and Document RAG application. This system integrates tabular data analysis and semantic document search inside a modern Streamlit interface, utilizing LangChain/LangGraph, Groq LLMs, Mistral OCR, and Chroma vector stores.
 
