@@ -78,7 +78,7 @@ streamlit run app.py
 ```
 
 ### 5. LIVE LINK
-[https://sql-assistant-wmouprmjyfpvhegupj7kaf.streamlit.app/]
+(https://sql-assistant-wmouprmjyfpvhegupj7kaf.streamlit.app/)
 
 
 ---
