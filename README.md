@@ -77,6 +77,11 @@ Start the Streamlit application:
 streamlit run app.py
 ```
 
+### 5. LIVE LINK
+```bash
+[Website Link](https://sql-assistant-wmouprmjyfpvhegupj7kaf.streamlit.app/)
+```
+
 ---
 
 ## 🛡️ Security & Guardrails
