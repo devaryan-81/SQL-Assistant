@@ -4,6 +4,8 @@ python-dotenv==1.2.2
 transformers
 torch
 torchvision
+opentelemetry-proto>=1.25.0
+protobuf>=5.0.0
 
 # Data Processing & Databases
 pandas==3.0.5
