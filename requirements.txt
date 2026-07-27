@@ -1,6 +1,9 @@
 # Streamlit Frontend Web App
 streamlit==1.60.0
 python-dotenv==1.2.2
+transformers
+torch
+torchvision
 
 # Data Processing & Databases
 pandas==3.0.5
