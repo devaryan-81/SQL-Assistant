@@ -17,6 +17,7 @@ langchain==1.3.14
 langchain-core==1.5.1
 langchain-groq==1.1.3
 langgraph==1.2.9
+langchain-text-splitters
 
 # RAG & Semantic Search
 langchain-chroma==1.1.0
