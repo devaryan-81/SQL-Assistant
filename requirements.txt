@@ -1,0 +1,24 @@
+# Streamlit Frontend Web App
+streamlit==1.60.0
+python-dotenv==1.2.2
+
+# Data Processing & Databases
+pandas==3.0.5
+openpyxl==3.1.5
+SQLAlchemy==2.0.51
+
+# AI Orchestration (LangChain & LangGraph)
+langchain==1.3.14
+langchain-core==1.5.1
+langchain-groq==1.1.3
+langgraph==1.2.9
+
+# RAG & Semantic Search
+langchain-chroma==1.1.0
+langchain-huggingface==1.2.2
+chromadb==1.5.9
+sentence-transformers==5.6.0
+
+# OCR & Document Processing
+mistralai==2.7.2
+pypdf==6.14.2
