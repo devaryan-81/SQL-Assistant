@@ -128,6 +128,16 @@ st.markdown(
 
     .stApp {{ background: {T['bg']}; color: {T['text']}; }}
 
+    /* Fixes uneven colors at the top header by making it transparent to inherit app background */
+    [data-testid="stHeader"] {{
+        background-color: transparent !important;
+    }}
+
+    /* Fixes the sticky bottom container block around the chat input to follow light/dark mode */
+    [data-testid="stBottom"] {{
+        background-color: {T['bg']} !important;
+    }}
+
     .block-container {{ max-width: 820px; padding-top: 2.5rem; }}
 
     h1, h2, h3 {{ font-weight: 600 !important; letter-spacing: -0.01em; color: {T['text']}; }}

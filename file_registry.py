@@ -27,6 +27,15 @@ def _get_conn():
         )
         """
     )
+    # Migrate old schemas (rename older columns file_id -> id, filename -> name, filetype -> type)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(uploaded_files)").fetchall()}
+    if "file_id" in cols:
+        conn.execute("ALTER TABLE uploaded_files RENAME COLUMN file_id TO id")
+    if "filename" in cols:
+        conn.execute("ALTER TABLE uploaded_files RENAME COLUMN filename TO name")
+    if "filetype" in cols:
+        conn.execute("ALTER TABLE uploaded_files RENAME COLUMN filetype TO type")
+
     # Backfill for existing DBs created before alias/db_path existed.
     cols = {row[1] for row in conn.execute("PRAGMA table_info(uploaded_files)").fetchall()}
     if "alias" not in cols:
