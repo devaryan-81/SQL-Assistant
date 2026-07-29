@@ -16,15 +16,9 @@ _ALIAS_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 
 class MultiSchemaDB:
     """
-    Minimal drop-in replacement for langchain's SQLDatabase, but built for a
-    single connection with MULTIPLE attached sqlite databases (one per
-    uploaded file, each attached under its own alias/schema name). Exposes
-    the same shape (`get_usable_table_names`, `get_table_info`, `run`) so
-    the rest of the code (rag.py's auto_generate_schema_docs, agent.py's
-    tools) doesn't need to know the difference.
-
-    Table names throughout are qualified as "alias.table", e.g.
-    "example_1.sheet1".
+    A single connection with MULTIPLE attached sqlite databases (one per
+    uploaded Excel/CSV file, each attached under its own alias/schema
+    name), so tables are queryable as `alias.table`, e.g. `example_1.sheet1`.
     """
 
     def __init__(self, engine):
@@ -44,31 +38,26 @@ class MultiSchemaDB:
                 names.append(f"{schema}.{t}")
         return names
 
-    def get_table_info(self, table_names: list[str] | None = None) -> str:
+    def get_compact_schema(self) -> str:
+        """
+        Compact `schema.table: col1 (TYPE), col2 (TYPE)` listing, one line
+        per table. Meant to be injected directly into the system prompt so
+        the agent already knows every table and column before it ever
+        writes a query -- no separate list-tables/describe-schema tool
+        call needed. If the agent wants to see actual sample values, it can
+        just run `SELECT ... LIMIT 5` itself through sql_tool.
+        """
         insp = inspect(self.engine)
-        targets = table_names or self.get_usable_table_names()
-        parts = []
-        with self.engine.connect() as conn:
-            for qualified in targets:
-                if "." not in qualified:
-                    parts.append(f"-- skipped '{qualified}': expected 'alias.table' format")
-                    continue
-                schema, table = qualified.split(".", 1)
+        lines = []
+        for schema in self._schemas():
+            for t in insp.get_table_names(schema=schema):
                 try:
-                    cols = insp.get_columns(table, schema=schema)
+                    cols = insp.get_columns(t, schema=schema)
+                    col_list = ", ".join(f"{c['name']} ({c['type']})" for c in cols)
                 except Exception as e:
-                    parts.append(f"-- could not inspect {qualified}: {e}")
-                    continue
-                col_defs = ", ".join(f"{c['name']} {c['type']}" for c in cols)
-                ddl = f"CREATE TABLE {qualified} ({col_defs});"
-                try:
-                    sample = conn.execute(text(f"SELECT * FROM {qualified} LIMIT 3")).fetchall()
-                    sample_str = "\n".join(str(tuple(row)) for row in sample)
-                    block = f"{ddl}\n/*\n{len(sample)} sample rows from {qualified}:\n{sample_str}\n*/"
-                except Exception:
-                    block = ddl
-                parts.append(block)
-        return "\n\n".join(parts)
+                    col_list = f"(could not inspect: {e})"
+                lines.append(f"{schema}.{t}: {col_list}")
+        return "\n".join(lines) if lines else "(no Excel/CSV files uploaded yet -- no tables exist)"
 
     def run(self, query: str):
         with self.engine.connect() as conn:
@@ -129,14 +118,24 @@ def enforce_row_limit(query: str, max_rows: int = MAX_ROWS) -> str:
     return query.rstrip().rstrip(";") + f" LIMIT {max_rows};"
 
 
-def make_safe_query_tool(db: MultiSchemaDB):
+def make_sql_tool(db: MultiSchemaDB):
+    """
+    The one and only SQL tool. The agent already knows the schema (it's
+    injected into the system prompt at build time), so this tool just
+    takes a raw query -- no separate list-tables/describe-schema tools.
+    The agent can run its own `SELECT ... LIMIT n` introspection queries
+    if it wants sample values; it knows SQL, it doesn't need a wrapper for
+    that.
+    """
+
     @tool
-    def query_data_tables(query: str) -> str:
-        """Execute a read-only SQL SELECT query against the user's uploaded
-        Excel/CSV data and return the result. Tables must be qualified as
-        `alias.table`, e.g. `example_1.sheet1` (alias = the uploaded file's
-        name). Only SELECT (or WITH ... SELECT) statements are permitted --
-        anything else is rejected with an explanation, not executed."""
+    def sql_tool(query: str) -> str:
+        """Execute a read-only SQL SELECT (or WITH ... SELECT) query
+        against the user's uploaded Excel/CSV data and return the result.
+        Tables must be qualified as `schema.table`, e.g. `example_1.sheet1`
+        (schema = the uploaded file's name). Only SELECT/WITH statements
+        are permitted -- anything else is rejected with an explanation,
+        not executed."""
         safe, reason = is_safe_query(query)
         if not safe:
             return reason
@@ -147,28 +146,4 @@ def make_safe_query_tool(db: MultiSchemaDB):
         except Exception as e:
             return f"ERROR executing query: {e}"
 
-    return query_data_tables
-
-
-def make_schema_tools(db: MultiSchemaDB):
-    """Replacement for SQLDatabaseToolkit's list/schema tools, since that
-    toolkit only understands a single schema and we have one per file."""
-
-    @tool
-    def list_data_tables() -> str:
-        """List every table currently available to query, qualified as
-        `alias.table` (alias = the uploaded file's name). Call this before
-        writing a query if you're unsure what tables exist."""
-        tables = db.get_usable_table_names()
-        return "\n".join(tables) if tables else "No tables available yet -- no Excel/CSV files uploaded."
-
-    @tool
-    def describe_table_schema(table_names: str) -> str:
-        """Get the CREATE TABLE statement and a few sample rows for one or
-        more tables, so you know the exact column names before writing a
-        query. Input: comma-separated qualified table names, e.g.
-        'example_1.sheet1, example_1.sheet2'."""
-        names = [t.strip() for t in table_names.split(",") if t.strip()]
-        return db.get_table_info(names)
-
-    return [list_data_tables, describe_table_schema]
+    return sql_tool

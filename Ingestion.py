@@ -69,8 +69,8 @@ def _ingest_tabular(
 
     register_file(
         session_id=session_id,
-        filename=original_filename,
-        filetype=file_path.suffix.lower().lstrip("."),
+        name=original_filename,
+        type=file_path.suffix.lower().lstrip("."),
         size_bytes=file_path.stat().st_size,
         storage_type="sql",
         alias=alias,
@@ -83,7 +83,7 @@ def _ingest_tabular(
 def _ingest_document(file_path: Path, original_filename: str, vectorstore, session_id: str) -> int:
     """
     Runs Mistral OCR (markdown per page) then hierarchically chunks along
-    headings/tables (see mistral_ocr.py) instead of blindly slicing every
+    headings/tables (see mistral_OCR.py) instead of blindly slicing every
     N characters -- this keeps each chunk semantically whole and preserves
     table structure.
     """
@@ -108,8 +108,8 @@ def _ingest_document(file_path: Path, original_filename: str, vectorstore, sessi
 
     register_file(
         session_id=session_id,
-        filename=original_filename,
-        filetype=file_path.suffix.lower().lstrip("."),
+        name=original_filename,
+        type=file_path.suffix.lower().lstrip("."),
         size_bytes=file_path.stat().st_size,
         storage_type="vector",
         chunk_count=len(docs),
@@ -126,35 +126,35 @@ def ingest_file(
 ) -> dict:
     """
     Returns a small result dict the UI can show as a confirmation message,
-    e.g. {"type": "sql", "detail": {"alias": "example_1", "tables": [...]}}
+    e.g. {"name": "...", "type": "sql", "detail": {"alias": "example_1", "tables": [...]}}
     """
     ext = file_path.suffix.lower()
     try:
         if ext in SUPPORTED_TABULAR:
             result = _ingest_tabular(file_path, original_filename, schemas_dir, session_id)
-            return {"filename": original_filename, "type": "sql", "detail": result}
+            return {"name": original_filename, "type": "sql", "detail": result}
         elif ext in SUPPORTED_DOCUMENT:
             n_chunks = _ingest_document(file_path, original_filename, vectorstore, session_id)
-            return {"filename": original_filename, "type": "vector", "detail": f"{n_chunks} chunks"}
+            return {"name": original_filename, "type": "vector", "detail": f"{n_chunks} chunks"}
         else:
             register_file(
                 session_id=session_id,
-                filename=original_filename,
-                filetype=ext.lstrip("."),
+                name=original_filename,
+                type=ext.lstrip("."),
                 size_bytes=file_path.stat().st_size,
                 storage_type="unsupported",
                 status="error",
                 error_message="Unsupported file type",
             )
-            return {"filename": original_filename, "type": "error", "detail": "Unsupported file type"}
+            return {"name": original_filename, "type": "error", "detail": "Unsupported file type"}
     except Exception as e:
         register_file(
             session_id=session_id,
-            filename=original_filename,
-            filetype=ext.lstrip("."),
+            name=original_filename,
+            type=ext.lstrip("."),
             size_bytes=file_path.stat().st_size,
             storage_type="error",
             status="error",
             error_message=str(e),
         )
-        return {"filename": original_filename, "type": "error", "detail": str(e)}
+        return {"name": original_filename, "type": "error", "detail": str(e)}

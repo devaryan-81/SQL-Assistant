@@ -4,8 +4,6 @@ from typing import Optional
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 BASE_PERSIST_DIR = Path(__file__).parent / "chroma_stores"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -17,42 +15,10 @@ def _store_dir_for_session(session_id: str) -> Path:
     return BASE_PERSIST_DIR / key
 
 
-def auto_generate_schema_docs(db) -> list[Document]:
-    """
-    Build one Document per table using the DB's own metadata + sample rows.
-    Works with anything exposing get_usable_table_names()/get_table_info()
-    (e.g. guardrails.MultiSchemaDB) -- no manual per-schema writing required.
-    """
-    docs = []
-    for table_name in db.get_usable_table_names():
-        info = db.get_table_info([table_name])
-        docs.append(
-            Document(
-                page_content=info,
-                metadata={"table": table_name, "type": "auto_schema"},
-            )
-        )
-    return docs
-
-
-def glossary_docs_from_text(text: str, source_name: str = "user_glossary") -> list[Document]:
-    """
-    Optional: chunk user-supplied business-rules / glossary text into
-    Documents. Use this when the user uploads a README, data dictionary,
-    or business-rules doc alongside their database.
-    """
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_text(text)
-    return [
-        Document(page_content=chunk, metadata={"type": "business_rule", "source": source_name})
-        for chunk in chunks
-    ]
-
-
 def has_uploaded_documents(vectorstore: Chroma) -> bool:
     """True if at least one PDF/Word chunk has been ingested this session.
-    Used to decide whether search_uploaded_documents is worth calling at
-    all -- schema/business-rule docs don't count."""
+    Used to tell the agent (via the system prompt) whether
+    search_document_context has anything to search at all."""
     try:
         got = vectorstore.get(where={"type": "user_document"}, limit=1)
         return bool(got and got.get("ids"))
@@ -67,10 +33,9 @@ def search_documents(
     files: Optional[list[str]] = None,
 ) -> str:
     """
-    Searches only actual uploaded PDF/Word chunks (never the auto-generated
-    schema docs -- those are covered by the SQL schema tools instead).
-    If `files` is given, restricts the search to those filenames; otherwise
-    searches across every uploaded document in the session.
+    Searches uploaded PDF/Word chunks. If `files` is given, restricts the
+    search to those filenames; otherwise searches every uploaded document
+    in the session.
     """
     if files:
         where = {"$and": [{"type": "user_document"}, {"filename": {"$in": files}}]}
@@ -80,7 +45,7 @@ def search_documents(
     results = vectorstore.similarity_search(query, k=num_results, filter=where)
     if not results:
         scope = f" in {', '.join(files)}" if files else ""
-        return f"No matching content found{scope}. Check list_uploaded_files to confirm the filename(s)."
+        return f"No matching content found{scope}. Check get_user_info to confirm the filename(s)."
 
     parts = []
     for i, doc in enumerate(results, start=1):
@@ -98,29 +63,16 @@ def search_documents(
     return "\n\n".join(parts)
 
 
-def build_vectorstore(
-    db,
-    session_id: str,
-    glossary_text: Optional[str] = None,
-) -> Chroma:
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-
-    documents = auto_generate_schema_docs(db)
-    if glossary_text:
-        documents += glossary_docs_from_text(glossary_text)
-
+def build_vectorstore(session_id: str) -> Chroma:
+    """
+    Opens (or creates) this session's persisted Chroma collection. Starts
+    empty -- documents are added as they're uploaded via
+    Ingestion._ingest_document -- so there's nothing to bootstrap here.
+    """
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
     persist_dir = _store_dir_for_session(session_id)
-
-    # A brand-new session starts with no tables and no glossary, so there
-    # may be zero documents -- Chroma.from_documents([]) errors on an empty
-    # list. Initialize an empty collection instead and add docs if present.
-    vectorstore = Chroma(
+    return Chroma(
         embedding_function=embeddings,
         persist_directory=str(persist_dir),
-        collection_name="schema_docs",
+        collection_name="user_documents",
     )
-    if documents:
-        vectorstore.add_documents(documents)
-    return vectorstore

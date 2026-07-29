@@ -15,425 +15,521 @@ from file_registry import list_files
 
 load_dotenv()
 
-# Modern, spacious dashboard configuration
-st.set_page_config(
-    page_title="Data Console • AI Analytics", 
-    page_icon="⚡", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Ask Your Data", page_icon="✳️", layout="wide")
 
 # ---------------------------------------------------------------------------
-# ENTERPRISE MATTE UI CORE STYLE
+# Theme: a small set of color tokens per mode, so dark/light stay in sync
+# from one CSS template instead of two hand-maintained stylesheets. The
+# toggle lives at the very top so its value is set before the CSS below
+# reads it.
 # ---------------------------------------------------------------------------
-TOOL_STYLES = {
-    "list_uploaded_files": {"icon": "📁", "color": "#6366F1", "label": "Files Index"},
-    "list_data_tables": {"icon": "🗂️", "color": "#3B82F6", "label": "Tables Catalog"},
-    "describe_table_schema": {"icon": "🔎", "color": "#8B5CF6", "label": "Schema Insight"},
-    "query_data_tables": {"icon": "⚡", "color": "#10B981", "label": "Engine execution"},
-    "search_uploaded_documents": {"icon": "📄", "color": "#F59E0B", "label": "Semantic Search"},
+THEMES = {
+    "dark": {
+        "bg": "#18191A",
+        "sidebar_bg": "#1E1F20",
+        "border": "#2C2D2E",
+        "text": "#ECECEC",
+        "muted": "#8F8F8F",
+        "muted2": "#7A7A7A",
+        "code_bg": "#131415",
+        "chat_bg": "#1E1F20",
+        "input_bg": "#1E1F20",
+        "tool_card_bg": "#1B1C1D",
+        "file_row_bg": "#18191A",
+        "button_bg": "#1E1F20",
+        "accent": "#2DD4BF",
+        "pill_bg": "rgba(45,212,191,0.12)",
+        "pill_border": "rgba(45,212,191,0.35)",
+        "feature_grad": "linear-gradient(135deg, #1E8F82 0%, #10534C 100%)",
+        "feature_text": "#F3FBFA",
+        "feature_desc": "#DCF3F0",
+    },
+    "light": {
+        "bg": "#FFFFFF",
+        "sidebar_bg": "#FAFAFA",
+        "border": "#EDEDED",
+        "text": "#1B1B1B",
+        "muted": "#8A8A8A",
+        "muted2": "#9A9A9A",
+        "code_bg": "#F5F5F5",
+        "chat_bg": "#FFFFFF",
+        "input_bg": "#FFFFFF",
+        "tool_card_bg": "#FAFAFA",
+        "file_row_bg": "#FFFFFF",
+        "button_bg": "#FFFFFF",
+        "accent": "#0E8E80",
+        "pill_bg": "#F0FBFA",
+        "pill_border": "#CDEFEA",
+        "feature_grad": "linear-gradient(135deg, #1FAE9E 0%, #0E7A6E 100%)",
+        "feature_text": "#FFFFFF",
+        "feature_desc": "#EAFBF8",
+    },
 }
-DEFAULT_TOOL_STYLE = {"icon": "🔧", "color": "#6B7280", "label": "System Utility"}
-ERROR_MARKERS = ("ERROR", "Rejected:")
 
+if "theme" not in st.session_state:
+    st.session_state.theme = "dark"
+
+_is_light = st.sidebar.toggle(
+    "☀️ Light mode",
+    value=(st.session_state.theme == "light"),
+    key="theme_toggle",
+)
+st.session_state.theme = "light" if _is_light else "dark"
+T = THEMES[st.session_state.theme]
+
+# ---------------------------------------------------------------------------
+# One place to describe each tool: icon, accent color, human label. Used
+# for both the live "thinking" trace and the tool-call cards, so every
+# tool is rendered the same way everywhere.
+# ---------------------------------------------------------------------------
+TOOL_META = {
+    "get_user_info": {"icon": "📁", "color": "#7FB0E0", "bg": "rgba(127,176,224,0.14)", "label": "Files"},
+    "sql_tool": {"icon": "◆", "color": "#2DD4BF", "bg": "rgba(45,212,191,0.14)", "label": "SQL Query"},
+    "search_document_context": {"icon": "🔎", "color": "#E3A857", "bg": "rgba(227,168,87,0.14)", "label": "Document Search"},
+}
+DEFAULT_TOOL_META = {"icon": "🔧", "color": "#9A9A9A", "bg": "rgba(154,154,154,0.14)", "label": "Tool"}
+
+
+def _tool_meta(name: str) -> dict:
+    return TOOL_META.get(name, DEFAULT_TOOL_META)
+
+
+def _pretty(value):
+    """Best-effort pretty-print, exactly as received: dicts/lists become
+    indented JSON; strings that happen to parse as JSON get reformatted as
+    JSON; anything else is returned completely unmodified. Returns
+    (text, language) for st.code."""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, indent=2), "json"
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith(("{", "[")):
+            try:
+                return json.dumps(json.loads(stripped), indent=2), "json"
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return value, None
+    return str(value), None
+
+
+# ---------------------------------------------------------------------------
+# Theme CSS, built from the token dict above -- matched to Perplexity's
+# layout/style (serif hero heading, gradient feature cards, pill input),
+# with a light variant added on top of the original dark match. (Built to
+# match the visual style/layout from the reference screenshot -- not
+# extracted from their actual code or brand assets.)
+# ---------------------------------------------------------------------------
 st.markdown(
-    """
+    f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    /* Global Typography Reset */
-    html, body, [class*="css"] { 
-        font-family: 'Plus Jakarta Sans', sans-serif; 
-    }
-    .stApp { 
-        background-color: #0F172A; 
-        color: #F1F5F9; 
-    }
+    html, body, [class*="css"] {{ font-family: 'Inter', -apple-system, sans-serif; }}
 
-    /* Elegant Structural Headers */
-    h1, h2, h3, h4 { 
-        font-family: 'Plus Jakarta Sans', sans-serif !important; 
-        font-weight: 600 !important;
-        letter-spacing: -0.02em !important;
-    }
-    
-    /* Matte Sidebar Restyling */
-    section[data-testid="stSidebar"] {
-        background-color: #0B0F19 !important;
-        border-right: 1px solid #1E293B !important;
-    }
+    .stApp {{ background: {T['bg']}; color: {T['text']}; }}
 
-    /* Advanced Message Bubble Architecture */
-    div[data-testid="stChatMessage"] {
-        background-color: #1E293B;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        padding: 1rem !important;
-        margin-bottom: 1rem;
-    }
-    div[data-testid="stChatMessage"] p {
-        font-size: 0.95rem !important;
-        line-height: 1.6 !important;
-    }
+    .block-container {{ max-width: 820px; padding-top: 2.5rem; }}
 
-    /* Fluent UI Components */
-    .stButton > button, .stDownloadButton > button {
-        background: #1E293B;
-        color: #F1F5F9;
-        border: 1px solid #334155;
-        border-radius: 8px;
+    h1, h2, h3 {{ font-weight: 600 !important; letter-spacing: -0.01em; color: {T['text']}; }}
+
+    section[data-testid="stSidebar"] {{
+        background: {T['sidebar_bg']};
+        border-right: 1px solid {T['border']};
+    }}
+    section[data-testid="stSidebar"] .block-container {{ padding-top: 1.5rem; }}
+    section[data-testid="stSidebar"] * {{ color: {T['text']}; }}
+
+    [data-testid="stChatMessage"] {{
+        background: {T['chat_bg']};
+        border: 1px solid {T['border']};
+        border-radius: 16px;
+        padding: 0.85rem 1.1rem !important;
+        margin-bottom: 0.6rem;
+        color: {T['text']};
+    }}
+
+    [data-testid="stChatInput"] {{
+        border-radius: 999px;
+        background: {T['input_bg']};
+        border: 1px solid {T['border']};
+    }}
+    [data-testid="stChatInput"] textarea {{
+        border-radius: 999px !important;
+        color: {T['text']} !important;
+    }}
+
+    .stButton>button, .stDownloadButton>button {{
+        border-radius: 999px;
+        border: 1px solid {T['border']};
+        background: {T['button_bg']};
+        color: {T['text']};
         font-weight: 500;
-        padding: 0.5rem 1rem;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .stButton > button:hover {
-        border-color: #38BDF8;
-        color: #38BDF8;
-        background: #1E293B;
-        box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
-    }
+    }}
+    .stButton>button:hover, .stDownloadButton>button:hover {{
+        border-color: {T['accent']};
+        color: {T['accent']};
+    }}
 
-    /* Monospace Data Terminal Styling */
-    div[data-testid="stJson"], .stCode, code, pre {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.85rem !important;
-    }
-    div[data-testid="stJson"] {
-        background-color: #020617 !important;
-        border: 1px solid #1E293B !important;
-        border-radius: 8px !important;
-    }
+    [data-testid="stExpander"] {{
+        background: {T['chat_bg']};
+        border: 1px solid {T['border']} !important;
+        border-radius: 12px;
+    }}
 
-    /* High-Fidelity Custom Layout Widgets */
-    .metric-card {
-        background: #131A2C;
-        border: 1px solid #1E293B;
-        border-radius: 8px;
-        padding: 0.6rem 0.8rem;
-        text-align: center;
-    }
-    .metric-val {
-        font-size: 1.2rem;
-        font-weight: 700;
-        color: #38BDF8;
-        font-family: 'JetBrains Mono', monospace;
-    }
-    .metric-lbl {
-        font-size: 0.7rem;
-        color: #64748B;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
+    [data-testid="stTextArea"] textarea, [data-testid="stSelectbox"] div, .stSlider {{
+        color: {T['text']};
+    }}
 
-    .tool-badge-card {
-        border: 1px solid #334155;
-        border-left: 4px solid var(--tc, #3B82F6);
-        background: #1E293B;
-        border-radius: 8px;
-        padding: 0.6rem 1rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 0.5rem;
-    }
-    .badge-meta {
+    code, pre, .stCode {{ font-family: 'JetBrains Mono', monospace !important; }}
+    [data-testid="stCodeBlock"] {{ background: {T['code_bg']} !important; }}
+
+    .hero-eyebrow {{
+        font-size: 0.85rem;
+        color: {T['muted']};
+        margin-bottom: 0.35rem;
+    }}
+    .hero-heading {{
+        font-family: 'Fraunces', serif;
+        font-weight: 500;
+        font-size: 2.4rem;
+        color: {T['text']};
+        margin-bottom: 1.6rem;
+        line-height: 1.2;
+    }}
+
+    .feature-card {{
+        background: {T['feature_grad']};
+        border-radius: 16px;
+        padding: 1.1rem 1.3rem;
+        color: {T['feature_text']};
+        height: 100%;
+    }}
+    .feature-card .fc-title {{
+        font-weight: 600;
+        font-size: 1.02rem;
+        margin-bottom: 0.35rem;
         display: flex;
         align-items: center;
         gap: 0.5rem;
-    }
-    .badge-title {
-        font-weight: 600;
-        font-size: 0.9rem;
-    }
-    .status-indicator {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.7rem;
-        padding: 0.15rem 0.5rem;
-        border-radius: 4px;
-        text-transform: uppercase;
-        font-weight: 500;
-    }
-    .status-ok { background: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .status-err { background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    }}
+    .feature-card .fc-desc {{
+        font-size: 0.85rem;
+        color: {T['feature_desc']};
+        line-height: 1.4;
+    }}
 
-    .file-pill {
+    .pill {{
+        display: inline-block;
+        background: {T['pill_bg']};
+        border: 1px solid {T['pill_border']};
+        color: {T['accent']};
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.76rem;
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        margin: 0.15rem 0.3rem 0.15rem 0;
+    }}
+
+    .file-row {{
         display: flex;
         align-items: center;
         justify-content: space-between;
-        background: #131A2C;
-        border: 1px solid #1E293B;
-        padding: 0.5rem 0.75rem;
-        border-radius: 6px;
-        margin-bottom: 0.4rem;
-        font-size: 0.85rem;
-    }
+        background: {T['file_row_bg']};
+        border: 1px solid {T['border']};
+        padding: 0.45rem 0.7rem;
+        border-radius: 10px;
+        margin-bottom: 0.35rem;
+        font-size: 0.83rem;
+        color: {T['text']};
+    }}
+
+    .tool-card {{
+        border-left: 3px solid var(--tc, {T['accent']});
+        background: {T['tool_card_bg']};
+        border-radius: 0 10px 10px 0;
+        padding: 0.45rem 0.85rem;
+        margin: 0.5rem 0 0.25rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+    }}
+    .tool-badge {{
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 0.15rem 0.65rem;
+        border-radius: 999px;
+        background: var(--tbg, {T['pill_bg']});
+        color: var(--tc, {T['accent']});
+    }}
+    .tool-name {{ font-size: 0.8rem; color: {T['muted']}; }}
+    .tool-name code {{ background: transparent; color: {T['muted']}; }}
+    .tool-index {{ margin-left: auto; font-size: 0.75rem; color: {T['muted2']}; }}
+
+    .section-label {{
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: {T['muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0.35rem 0 0.15rem 0;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+if not os.getenv("GROQ_API_KEY"):
+    st.error("GROQ_API_KEY not set. Add it to your .env file and restart.")
+    st.stop()
+
 # ---------------------------------------------------------------------------
-# Core Engine Session Handlers
+# Session setup: each uploaded Excel/CSV file gets its own physical .db file
+# under schemas_dir (e.g. schemas_dir/example_1.db), attached under its own
+# alias at query time -- so uploads never mutate each other or bleed across
+# sessions, and each file is queryable as `alias.table`.
 # ---------------------------------------------------------------------------
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
     tmp_dir = Path(tempfile.mkdtemp())
     st.session_state.upload_dir = tmp_dir
     st.session_state.schemas_dir = tmp_dir / "schemas"
-    st.session_state.processed_filenames = set()
+    st.session_state.processed_filenames = set()  # (name, size) tuples
     st.session_state.messages = []
-    st.session_state.bundle = None
+    st.session_state.bundle = None  # holds agent/db/vectorstore/checkpointer
 
 session_id = st.session_state.session_id
 
-def get_or_build_bundle(glossary_text=None):
+
+def get_or_build_bundle():
     if st.session_state.bundle is None:
-        with st.spinner("Initializing AI Core Context..."):
-            st.session_state.bundle = build_agent(session_id=session_id, glossary_text=glossary_text)
+        with st.spinner("Setting up..."):
+            st.session_state.bundle = build_agent(session_id=session_id)
     return st.session_state.bundle
 
+
 def rebuild_bundle_preserving_memory():
+    """Rebuild the agent so its system prompt picks up the latest schema
+    and document status, but reuse the same checkpointer so conversation
+    history is not lost."""
     old = st.session_state.bundle
-    with st.spinner("Refreshed schema parameters verified. Hot reloading agent..."):
+    with st.spinner("Updating with new data..."):
         st.session_state.bundle = build_agent(
             session_id=session_id,
             checkpointer=old["checkpointer"] if old else None,
         )
 
+
 # ---------------------------------------------------------------------------
-# Sidebar Panel Context
+# Sidebar: uploader + file list + Data Inspector.
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.subheader("📁 Data Asset Manager")
-    st.caption("Upload source spreadsheets (CSV/XLSX) or dynamic documents (PDF/DOCX) to append schema profiles to the workspace session.")
-    
+    st.markdown("#### Your files")
+    st.caption("Excel/CSV becomes queryable tables. PDF/Word becomes searchable text.")
+
     uploaded = st.file_uploader(
-        "Ingest Documents",
+        "Add file(s)",
         type=["csv", "xlsx", "xls", "pdf", "docx"],
         accept_multiple_files=True,
         key="uploader",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
-    
-    # Process Files Cleanly
-    new_results = []
-    if uploaded:
-        bundle = get_or_build_bundle()
-        for f in uploaded:
-            marker = (f.name, f.size)
-            if marker in st.session_state.processed_filenames:
-                continue
-            dest = st.session_state.upload_dir / f.name
-            dest.write_bytes(f.getbuffer())
-            result = ingest_file(
-                dest,
-                original_filename=f.name,
-                schemas_dir=st.session_state.schemas_dir,
-                vectorstore=bundle["vectorstore"],
-                session_id=session_id,
-            )
-            new_results.append(result)
-            st.session_state.processed_filenames.add(marker)
 
-    if new_results:
-        if any(r["type"] == "sql" for r in new_results):
-            rebuild_bundle_preserving_memory()
-        for r in new_results:
-            if r["type"] == "sql":
-                alias = r["detail"]["alias"]
-                qualified = [f"{alias}.{t}" for t in r["detail"]["tables"]]
-                note = f"📎 **Structured Asset Ingested**: File `{r['filename']}` committed to workspace routing alias `{alias}`. Found tables: {', '.join(qualified)}."
-            elif r["type"] == "vector":
-                note = f"📎 **Unstructured Document Appended**: Ingested `{r['filename']}` containing {r['detail']} partitioned embedding segments."
-            else:
-                note = f"⚠️ **Ingestion Fault**: Matrix build engine parsing failure on `{r['filename']}`: {r['detail']}"
-            st.session_state.messages.append({"role": "assistant", "content": note})
-
-    st.markdown("---")
-    
-    # Inline Quick Asset Metric Grid
-    files_list = list_files(session_id)
-    sql_files_count = sum(1 for f in files_list if f["storage_type"] == "sql")
-    vec_files_count = sum(1 for f in files_list if f["storage_type"] == "vector")
-    
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        st.markdown(f'<div class="metric-card"><div class="metric-val">{sql_files_count}</div><div class="metric-lbl">DB Schemas</div></div>', unsafe_allow_html=True)
-    with m_col2:
-        st.markdown(f'<div class="metric-card"><div class="metric-val">{vec_files_count}</div><div class="metric-lbl">Vector Docs</div></div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if files_list:
-        with st.expander("📝 Attached Assets Bin", expanded=True):
-            for f in files_list:
-                status_icon = "🟢" if f["status"] == "processed" else "🔴"
-                type_lbl = "Relational" if f["storage_type"] == "sql" else "Vector"
-                st.markdown(
-                    f'<div class="file-pill"><span>{status_icon} <b>{f["filename"]}</b></span>'
-                    f'<span style="color:#64748B; font-size:0.75rem;">{type_lbl}</span></div>',
-                    unsafe_allow_html=True
-                )
-                
-    if st.button("↺ Flush Workspace Session", use_container_width=True):
+    if st.button("Reset session", use_container_width=True):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
-# ---------------------------------------------------------------------------
-# Workspace Viewport Layout Setup
-# ---------------------------------------------------------------------------
+# Process any newly-added files (dedup by name+size so reruns don't re-ingest)
+new_results = []
+if uploaded:
+    bundle = get_or_build_bundle()
+    for f in uploaded:
+        marker = (f.name, f.size)
+        if marker in st.session_state.processed_filenames:
+            continue
+        dest = st.session_state.upload_dir / f.name
+        dest.write_bytes(f.getbuffer())
+        result = ingest_file(
+            dest,
+            original_filename=f.name,
+            schemas_dir=st.session_state.schemas_dir,
+            vectorstore=bundle["vectorstore"],
+            session_id=session_id,
+        )
+        new_results.append(result)
+        st.session_state.processed_filenames.add(marker)
+
+if new_results:
+    # Rebuild every time (SQL or document) so the system prompt's schema
+    # block and document-availability note always reflect the latest state.
+    rebuild_bundle_preserving_memory()
+
+    for r in new_results:
+        if r["type"] == "sql":
+            alias = r["detail"]["alias"]
+            qualified = [f"{alias}.{t}" for t in r["detail"]["tables"]]
+            note = f"📎 Added **{r['name']}** → schema `{alias}`, tables: {', '.join(qualified)}"
+        elif r["type"] == "vector":
+            note = f"📎 Added **{r['name']}** → {r['detail']} in the document search index"
+        else:
+            note = f"⚠️ Could not process **{r['name']}**: {r['detail']}"
+        st.session_state.messages.append({"role": "assistant", "content": note})
+
 bundle = get_or_build_bundle()
 agent = bundle["agent"]
 db = bundle["db"]
 tables = bundle["tables"]
 
-# Modern App Header Elements
-h_left, h_right = st.columns([3, 1])
-with h_left:
-    st.title("⚡ Enterprise Data Workspace")
-    st.caption("Perform multi-modal conversational orchestration over raw files. Pipeline execution details trace natively below.")
-with h_right:
-    st.markdown(
-        f'<div style="text-align:right; margin-top:1.5rem; font-family:\'JetBrains Mono\'; font-size:0.8rem; color:#64748B;">'
-        f'SESSION TRACKING ID: <span style="color:#38BDF8;">{session_id[:8].upper()}</span></div>',
-        unsafe_allow_html=True
-    )
-
-# Establish Primary Tab Viewports
-tab_chat, tab_inspector = st.tabs(["💬 Dynamic Engine Agent", "🔍 System Schema Inspector"])
-
-# ---------------------------------------------------------------------------
-# Tab Viewport 1: Conversations & Traces
-# ---------------------------------------------------------------------------
-def _parse_output(output):
-    if isinstance(output, (dict, list)):
-        return output, True
-    text = str(output)
-    if text.strip().startswith(("{", "[")):
-        try:
-            return json.loads(text.strip()), True
-        except Exception:
-            pass
-    return text, False
-
-def render_ui_tool_cards(tool_calls: list[dict], iteration_key: str):
-    if not tool_calls:
-        return
-    
-    with st.expander(f"🛠️ Pipeline Subroutine Logs ({len(tool_calls)} Tool Actions Evaluated)", expanded=False):
-        for idx, call in enumerate(tool_calls, start=1):
-            style = TOOL_STYLES.get(call["name"], DEFAULT_TOOL_STYLE)
-            out_str = str(call["output"])
-            is_err = any(err in out_str for err in ERROR_MARKERS)
-            badge_status = f'<span class="status-indicator status-err">Fault</span>' if is_err else f'<span class="status-indicator status-ok">Success</span>'
-            
+with st.sidebar:
+    files_list = list_files(session_id)
+    if files_list:
+        st.markdown("---")
+        for f in files_list:
+            status_dot = "🟢" if f["status"] == "processed" else "🔴"
+            kind = "table" if f["storage_type"] == "sql" else "document"
             st.markdown(
-                f"""
-                <div class="tool-badge-card" style="--tc: {style['color']}">
-                    <div class="badge-meta">
-                        <span style="font-size:1.1rem;">{style['icon']}</span>
-                        <span class="badge-title">Subroutine call: <code style="color:#38BDF8;">{call['name']}</code></span>
-                        <span style="color:#64748B; font-size:0.75rem; font-family:'JetBrains Mono';">#{idx}</span>
-                    </div>
-                    {badge_status}
-                </div>
-                """,
-                unsafe_allow_html=True
+                f'<div class="file-row"><span>{status_dot} {f["name"]}</span>'
+                f'<span style="color:{T["muted"]};font-size:0.75rem;">{kind}</span></div>',
+                unsafe_allow_html=True,
             )
-            
-            req_col, res_col = st.columns(2)
-            with req_col:
-                st.markdown("<small style='color:#64748B; font-family:\"JetBrains Mono\";'>ROUTING INPUT BLOCK</small>", unsafe_allow_html=True)
-                st.json(call["input"], expanded=True)
-            with res_col:
-                st.markdown("<small style='color:#64748B; font-family:\"JetBrains Mono\";'>PIPELINE RESPONSE STREAM</small>", unsafe_allow_html=True)
-                parsed, is_json = _parse_output(call["output"])
-                if is_json:
-                    st.json(parsed, expanded=False)
-                else:
-                    if len(out_str) > 1500:
-                        toggle_state = st.toggle("Expand Complete Payload", key=f"tgl-{iteration_key}-{idx}", value=False)
-                        st.code(out_str if toggle_state else out_str[:1500] + "\n\n... [Truncated for visibility. Click above to view complete log stream] ...", language=None)
-                    else:
-                        st.code(out_str, language=None)
-            if idx < len(tool_calls):
-                st.markdown("<hr style='margin:0.5rem 0; border-color:#1E293B;' />", unsafe_allow_html=True)
 
-with tab_chat:
-    if not tables and not st.session_state.messages:
-        st.info("👋 Ambient context empty. Upload tabular schemas or text corpuses via the left sidebar controls to instantiate context threads.")
-        
-    for idx, msg in enumerate(st.session_state.messages):
-        avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
-        with st.chat_message(msg["role"], avatar=avatar):
-            st.markdown(msg["content"])
-            if msg.get("tool_calls"):
-                render_ui_tool_cards(msg["tool_calls"], iteration_key=f"hist-{idx}")
+    with st.expander("🔍 Data Inspector", expanded=False):
+        if not tables:
+            st.caption("Upload an Excel/CSV file to browse its tables here.")
+        else:
+            st.caption("Browse a table directly, or run your own read-only SQL -- separate from the chat.")
+            selected_table = st.selectbox("Table", tables, key="inspector_table")
+            preview_rows = st.slider("Rows to preview", 5, 200, 25, key="inspector_rows")
+            if st.button("Preview table", key="inspector_preview_btn"):
+                try:
+                    df = pd.read_sql(f"SELECT * FROM {selected_table} LIMIT {preview_rows}", db.engine)
+                    st.dataframe(df, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Could not read {selected_table}: {e}")
 
-    question = st.chat_input("Query aggregated runtime knowledge layers...")
-    if question:
-        st.session_state.messages.append({"role": "user", "content": question})
-        with st.chat_message("user", avatar="🧑‍💻"):
-            st.markdown(question)
-
-        with st.chat_message("assistant", avatar="🤖"):
-            status_box = st.status("Initializing Execution Subroutines...", expanded=True)
-            answer, tool_calls = "", []
-            
-            for event in stream_agent(agent, question, config={"configurable": {"thread_id": session_id}}):
-                if event["type"] == "tool_call":
-                    style = TOOL_STYLES.get(event["name"], DEFAULT_TOOL_STYLE)
-                    status_box.write(f"{style['icon']} Invoking sub-process allocation: `{event['name']}`")
-                elif event["type"] == "tool_result":
-                    status_box.write(f"✅ Evaluated context callback from `{event['name']}`.")
-                elif event["type"] == "final":
-                    answer = event["content"]
-                    tool_calls = event["tool_calls"]
-
-            status_box.update(label="Subroutines Cleared", state="complete", expanded=False)
-            st.markdown(answer)
-            if tool_calls:
-                render_ui_tool_cards(tool_calls, iteration_key=f"live-{len(st.session_state.messages)}")
-
-        st.session_state.messages.append({"role": "assistant", "content": answer, "tool_calls": tool_calls})
-
-# ---------------------------------------------------------------------------
-# Tab Viewport 2: Expanded Inspector View
-# ---------------------------------------------------------------------------
-with tab_inspector:
-    if not tables:
-        st.info("No active relational targets deployed. Upload relational sources to review live physical layout definitions.")
-    else:
-        st.subheader("📊 Deployed Table Schema Layout Navigator")
-        
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            selected_table = st.selectbox("Select Active Physical Target Table Target", tables, key="inspect_tab_select")
-            preview_rows = st.slider("Preview Rows Allocation Size", 5, 100, 20, key="inspect_tab_slider")
-            
-            st.markdown("---")
-            st.markdown("### 🦺 Isolated Virtual Query Console")
-            st.caption("Submit custom read-only queries directly down to the memory matrix pool without affecting the agent context.")
-            custom_sql = st.text_area("SQL Statements Sandbox Input (Read-Only)", placeholder="SELECT * FROM file_alias.table_name LIMIT 10;", height=150)
-            execute_custom = st.button("Execute Sandboxed Query Statement", use_container_width=True)
-            
-        with c2:
-            st.markdown(f"#### Target Profiler Frame: `{selected_table}`")
-            try:
-                df_preview = pd.read_sql(f"SELECT * FROM {selected_table} LIMIT {preview_rows}", db.engine)
-                st.dataframe(df_preview, use_container_width=True, hide_index=True)
-            except Exception as e:
-                st.error(f"Failed to generate structured interface preview dataframes for target matrix: {e}")
-                
-            if execute_custom and custom_sql.strip():
-                st.markdown("#### Sandbox Output Execution Matrix")
-                safe, reason = is_safe_query(custom_sql)
+            st.divider()
+            custom_sql = st.text_area(
+                "Custom SQL (read-only)",
+                placeholder="SELECT * FROM example_1.sheet1 WHERE ...",
+                key="inspector_sql",
+            )
+            if st.button("Run query", key="inspector_run_btn"):
+                safe, reason = is_safe_query(custom_sql) if custom_sql.strip() else (False, "Enter a query first.")
                 if not safe:
                     st.error(reason)
                 else:
                     try:
-                        df_custom = pd.read_sql(enforce_row_limit(custom_sql), db.engine)
-                        st.dataframe(df_custom, use_container_width=True, hide_index=True)
+                        df = pd.read_sql(enforce_row_limit(custom_sql), db.engine)
+                        st.dataframe(df, use_container_width=True)
                     except Exception as e:
-                        st.error(f"Syntax validation error or execution exception encountered: {e}")
+                        st.error(f"Query failed: {e}")
+
+# ---------------------------------------------------------------------------
+# Main area
+# ---------------------------------------------------------------------------
+if not st.session_state.messages:
+    st.markdown('<div class="hero-eyebrow">Ask</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-heading">What do you want to know?</div>', unsafe_allow_html=True)
+
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <div class="fc-title">🗄️ Query your tables</div>
+                <div class="fc-desc">Upload Excel or CSV files and ask questions in plain English —
+                answered with real, read-only SQL.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with fc2:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <div class="fc-title">📄 Search your documents</div>
+                <div class="fc-desc">Upload PDFs or Word docs and ask about their content —
+                searched section by section, page-accurate.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+else:
+    st.markdown("#### Ask your data")
+    if tables:
+        st.markdown("".join(f'<span class="pill">{t}</span>' for t in tables), unsafe_allow_html=True)
+
+config = {"configurable": {"thread_id": session_id}}
+
+
+def _render_tool_calls(tool_calls: list[dict], key_prefix: str):
+    """
+    One common card per tool call, identical structure for every tool:
+    a colored badge naming the tool, then the EXACT input it was called
+    with and the EXACT output it received, both pretty-printed as JSON
+    where possible.
+    """
+    with st.expander(f"🔧 {len(tool_calls)} tool call{'s' if len(tool_calls) != 1 else ''}", expanded=False):
+        for i, tc in enumerate(tool_calls, start=1):
+            meta = _tool_meta(tc["name"])
+            st.markdown(
+                f"""
+                <div class="tool-card" style="--tc:{meta['color']};--tbg:{meta['bg']}">
+                    <span class="tool-badge">{meta['icon']} {meta['label']}</span>
+                    <span class="tool-name"><code>{tc['name']}</code></span>
+                    <span class="tool-index">#{i}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            input_str, input_lang = _pretty(tc["input"])
+            st.markdown('<div class="section-label">Input</div>', unsafe_allow_html=True)
+            st.code(input_str, language=input_lang or "json")
+
+            output_str, output_lang = _pretty(tc["output"])
+            st.markdown('<div class="section-label">Output</div>', unsafe_allow_html=True)
+            if len(output_str) > 2000:
+                show_full = st.toggle("Show full output", key=f"{key_prefix}-{i}", value=False)
+                st.code(output_str if show_full else output_str[:2000] + " …", language=output_lang)
+            else:
+                st.code(output_str, language=output_lang)
+
+            if i < len(tool_calls):
+                st.markdown(f"<hr style='margin:0.6rem 0;border-color:{T['border']}'>", unsafe_allow_html=True)
+
+
+for idx, msg in enumerate(st.session_state.messages):
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg.get("tool_calls"):
+            _render_tool_calls(msg["tool_calls"], key_prefix=f"hist-{idx}")
+
+question = st.chat_input("Ask anything about your data...")
+if question:
+    st.session_state.messages.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    with st.chat_message("assistant"):
+        status_box = st.status("Thinking...", expanded=True)
+        answer, tool_calls = "", []
+        for event in stream_agent(agent, question, config):
+            if event["type"] == "tool_call":
+                meta = _tool_meta(event["name"])
+                status_box.write(f"{meta['icon']} Calling **{meta['label']}**")
+            elif event["type"] == "tool_result":
+                meta = _tool_meta(event["name"])
+                status_box.write(f"✓ {meta['label']} returned a result")
+            elif event["type"] == "final":
+                answer = event["content"]
+                tool_calls = event["tool_calls"]
+
+        status_box.update(label="Done", state="complete", expanded=False)
+        st.markdown(answer)
+        if tool_calls:
+            _render_tool_calls(tool_calls, key_prefix=f"live-{len(st.session_state.messages)}")
+
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer, "tool_calls": tool_calls}
+    )

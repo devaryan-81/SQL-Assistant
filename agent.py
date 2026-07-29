@@ -6,29 +6,29 @@ from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
-from prompts import SYSTEM_PROMPT
-from rag import build_vectorstore, search_documents
-from guardrails import build_readonly_db, make_safe_query_tool, make_schema_tools
+from prompts import build_system_prompt
+from rag import build_vectorstore, search_documents, has_uploaded_documents
+from guardrails import build_readonly_db, make_sql_tool
 from file_registry import list_files, list_sql_schemas
 
 GROQ_MODEL = "openai/gpt-oss-120b"
 
 
-def _make_file_info_tool(session_id: str):
+def _make_user_info_tool(session_id: str):
     @tool
-    def list_uploaded_files() -> str:
+    def get_user_info() -> str:
         """List every file the user has uploaded this session: name, type,
         when it was uploaded, and how it was stored. Excel/CSV files show
-        their schema alias and sheet/table names; PDF/Word files show their
-        chunk count. Use this when the user asks what they've uploaded,
-        what data is available, or when you're unsure whether a question
-        is about tabular data or a document."""
+        their schema alias and sheet/table names; PDF/Word files show
+        their chunk count. Use this when the user asks what they've
+        uploaded, what data is available, or when you're unsure whether a
+        question is about tabular data or a document."""
         files = list_files(session_id)
         if not files:
             return "No files have been uploaded yet in this session."
         lines = []
         for f in files:
-            header = f"- {f['filename']} ({f['filetype']}, uploaded {f['upload_date']})"
+            header = f"- {f['name']} ({f['type']}, uploaded {f['upload_date']})"
             if f["status"] != "processed":
                 lines.append(f"{header}: FAILED ({f['error_message']})")
             elif f["storage_type"] == "sql":
@@ -40,12 +40,11 @@ def _make_file_info_tool(session_id: str):
                 lines.append(f"{header} -> {f['chunk_count']} chunk(s) in the document search index")
         return "\n".join(lines)
 
-    return list_uploaded_files
+    return get_user_info
 
 
 def build_agent(
     session_id: str,
-    glossary_text: Optional[str] = None,
     checkpointer: Optional[InMemorySaver] = None,
 ):
     if not os.getenv("GROQ_API_KEY"):
@@ -59,22 +58,19 @@ def build_agent(
     # them under their alias so tables are queryable as `alias.table`.
     schemas = list_sql_schemas(session_id)
     db = build_readonly_db(schemas)
+    sql_tool = make_sql_tool(db)
 
-    sql_tools = make_schema_tools(db) + [make_safe_query_tool(db)]
-
-    vectorstore = build_vectorstore(db, session_id, glossary_text=glossary_text)
+    vectorstore = build_vectorstore(session_id)
 
     @tool
-    def search_uploaded_documents(
+    def search_document_context(
         query: str,
         num_results: int = 5,
         files: Optional[list[str]] = None,
     ) -> str:
         """Search the content of uploaded PDF/Word documents (NOT Excel/CSV
-        data -- use the SQL tools for that). Only call this if the user has
-        actually uploaded a PDF/Word file this session (check
-        list_uploaded_files if unsure) -- there is nothing to search
-        otherwise.
+        data -- use sql_tool for that). Only call this if the user has
+        actually uploaded a PDF/Word file this session.
 
         Args:
             query: what to search for.
@@ -84,9 +80,14 @@ def build_agent(
         """
         return search_documents(vectorstore, query, num_results=num_results, files=files)
 
-    file_info_tool = _make_file_info_tool(session_id)
+    user_info_tool = _make_user_info_tool(session_id)
 
-    all_tools = sql_tools + [search_uploaded_documents, file_info_tool]
+    all_tools = [user_info_tool, sql_tool, search_document_context]
+
+    system_prompt = build_system_prompt(
+        schema_text=db.get_compact_schema(),
+        has_documents=has_uploaded_documents(vectorstore),
+    )
 
     # Reuse the same checkpointer across rebuilds so conversation memory
     # survives when a new file is uploaded mid-chat.
@@ -94,7 +95,7 @@ def build_agent(
     agent = create_agent(
         model,
         all_tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         checkpointer=checkpointer,
     )
     return {
@@ -134,9 +135,9 @@ def run_agent(agent, question: str, config: dict):
                     "output": outputs_by_call_id.get(tc["id"], ""),
                 }
             )
-            if tc["name"] == "query_data_tables":
+            if tc["name"] == "sql_tool":
                 executed_queries.append(tc["args"]["query"])
-            if tc["name"] == "search_uploaded_documents":
+            if tc["name"] == "search_document_context":
                 used_rag = True
 
     return result["messages"][-1].content, executed_queries, used_rag, tool_calls
@@ -175,9 +176,9 @@ def stream_agent(agent, question: str, config: dict):
                         calls_by_id[tc["id"]] = record
                         ordered_calls.append(record)
                         yield {"type": "tool_call", "name": tc["name"], "input": tc["args"]}
-                        if tc["name"] == "query_data_tables":
+                        if tc["name"] == "sql_tool":
                             executed_queries.append(tc["args"]["query"])
-                        if tc["name"] == "search_uploaded_documents":
+                        if tc["name"] == "search_document_context":
                             used_rag = True
                 elif getattr(msg, "type", None) == "tool":
                     record = calls_by_id.get(msg.tool_call_id)

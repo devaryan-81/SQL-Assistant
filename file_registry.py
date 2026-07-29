@@ -11,10 +11,10 @@ def _get_conn():
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS uploaded_files (
-            file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
-            filename TEXT NOT NULL,
-            filetype TEXT NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
             size_bytes INTEGER NOT NULL,
             upload_date TEXT NOT NULL,
             storage_type TEXT NOT NULL,
@@ -38,8 +38,8 @@ def _get_conn():
 
 def register_file(
     session_id: str,
-    filename: str,
-    filetype: str,
+    name: str,
+    type: str,
     size_bytes: int,
     storage_type: str,
     alias: str | None = None,
@@ -52,14 +52,14 @@ def register_file(
     conn = _get_conn()
     cur = conn.execute(
         """INSERT INTO uploaded_files
-           (session_id, filename, filetype, size_bytes, upload_date,
+           (session_id, name, type, size_bytes, upload_date,
             storage_type, alias, db_path, tables_created, chunk_count,
             status, error_message)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             session_id,
-            filename,
-            filetype,
+            name,
+            type,
             size_bytes,
             datetime.now(timezone.utc).isoformat(),
             storage_type,
@@ -72,15 +72,15 @@ def register_file(
         ),
     )
     conn.commit()
-    file_id = cur.lastrowid
+    id = cur.lastrowid
     conn.close()
-    return file_id
+    return id
 
 
 def list_files(session_id: str) -> list[dict]:
     conn = _get_conn()
     rows = conn.execute(
-        """SELECT file_id, filename, filetype, size_bytes, upload_date,
+        """SELECT id, name, type, size_bytes, upload_date,
                   storage_type, alias, db_path, tables_created, chunk_count,
                   status, error_message
            FROM uploaded_files WHERE session_id = ?
@@ -89,7 +89,7 @@ def list_files(session_id: str) -> list[dict]:
     ).fetchall()
     conn.close()
     cols = [
-        "file_id", "filename", "filetype", "size_bytes", "upload_date",
+        "id", "name", "type", "size_bytes", "upload_date",
         "storage_type", "alias", "db_path", "tables_created", "chunk_count",
         "status", "error_message",
     ]
@@ -110,7 +110,7 @@ def list_sql_schemas(session_id: str) -> list[dict]:
         {
             "alias": f["alias"],
             "db_path": f["db_path"],
-            "filename": f["filename"],
+            "name": f["name"],
             "tables": f["tables_created"],
         }
         for f in files
@@ -118,13 +118,13 @@ def list_sql_schemas(session_id: str) -> list[dict]:
     ]
 
 
-def already_processed(session_id: str, filename: str, size_bytes: int) -> bool:
+def already_processed(session_id: str, name: str, size_bytes: int) -> bool:
     """Guard against re-ingesting the same file on a Streamlit rerun."""
     conn = _get_conn()
     row = conn.execute(
         """SELECT 1 FROM uploaded_files
-           WHERE session_id = ? AND filename = ? AND size_bytes = ? AND status = 'processed'""",
-        (session_id, filename, size_bytes),
+           WHERE session_id = ? AND name = ? AND size_bytes = ? AND status = 'processed'""",
+        (session_id, name, size_bytes),
     ).fetchone()
     conn.close()
     return row is not None
